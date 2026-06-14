@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pembukuan Online Dashboard</title>
+    <script src="https://d3js.org/v7.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --primary: #4e73df;
+            --success: #1cc88a;
+            --danger: #e74a3b;
+            --text-main: #333333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+            color: var(--text-main);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 30px;
+        }
+
+        h1 { margin: 0; color: #2c3e50; }
+
+        /* CSS3 Grid Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .card h3 {
+            margin-top: 0;
+            border-bottom: 2px solid #f1f1f1;
+            padding-bottom: 10px;
+        }
+
+        /* D3 Chart Styling */
+        .bar-masuk { fill: var(--success); }
+        .bar-keluar { fill: var(--danger); }
+        
+        .axis-label {
+            font-size: 12px;
+            fill: #666;
+        }
+        
+        .tooltip {
+            position: absolute;
+            background: #333;
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Sistem Pembukuan Digital</h1>
+        <p>Visualisasi Real-time Arus Kas</p>
+    </header>
+
+    <div class="dashboard-grid">
+        <div class="card">
+            <h3>Perbandingan Arus Kas (Total)</h3>
+            <div id="chart-container"></div>
+        </div>
+
+        <div class="card">
+            <h3>Ringkasan Log</h3>
+            <p>Gunakan visualisasi di samping untuk memantau kestabilan rasio keuangan Anda secara berkala.</p>
+            <div id="summary-text">Membuat grafik...</div>
+        </div>
+    </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+    // Fetch data dari API Django
+    fetch('/api/data-keuangan/')
+        .then(response => response.json())
+        .then(data => {
+            renderChart(data.ringkasan);
+        });
+
+    function renderChart(data) {
+        // data berbentuk: [{jenis: 'masuk', total: 500000}, {jenis: 'keluar', total: 300000}]
+        
+        const width = 400;
+        const height = 300;
+        const margin = {top: 20, right: 20, bottom: 40, left: 60};
+
+        // Seleksi container dan hapus isi sebelumnya jika ada
+        const container = d3.select("#chart-container");
+        container.html("");
+
+        const svg = container.append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // Skala Grafik
+        const x = d3.scaleBand()
+            .domain(data.map(d => d.jenis === 'masuk' ? 'Pemasukan' : 'Pengeluaran'))
+            .range([margin.left, width - margin.right])
+            .padding(0.4);
+
+        const y = d3.scaleLinear()
+            .domain([0, d3.max(data, d => floatParse(d.total)) * 1.1 || 100000])
+            .range([height - margin.bottom, margin.top]);
+
+        // Helper untuk parse float aman
+        function floatParse(val) { return parseFloat(val) || 0; }
+
+        // Gambar Batang (Bars)
+        svg.selectAll(".bar")
+            .data(data)
+            .enter()
+            .append("rect")
+            .attr("class", d => d.jenis === 'masuk' ? "bar-masuk" : "bar-keluar")
+            .attr("x", d => x(d.jenis === 'masuk' ? 'Pemasukan' : 'Pengeluaran'))
+            .attr("y", d => y(floatParse(d.total)))
+            .attr("width", x.bandwidth())
+            .attr("height", d => (height - margin.bottom) - y(floatParse(d.total)))
+            .on("mouseover", function(event, d) {
+                d3.select("#tooltip")
+                    .style("opacity", 1)
+                    .html(`Total: Rp ${floatParse(d.total).toLocaleString('id-ID')}`)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 15) + "px");
+            })
+            .on("mouseout", function() {
+                d3.select("#tooltip").style("opacity", 0);
+            });
+
+        // Sumbu X
+        svg.append("g")
+            .attr("transform", `translate(0,${height - margin.bottom})`)
+            .call(d3.axisBottom(x));
+
+        // Sumbu Y
+        svg.append("g")
+            .attr("transform", `translate(${margin.left},0)`)
+            .call(d3.axisLeft(y).ticks(5).tickFormat(d3.format(".2s")));
+
+        // Update teks ringkasan sederhana
+        let totalMasuk = floatParse((data.find(d => d.jenis === 'masuk') || {}).total);
+        let totalKeluar = floatParse((data.find(d => d.jenis === 'keluar') || {}).total);
+        let saldo = totalMasuk - totalKeluar;
+
+        document.getElementById("summary-text").innerHTML = `
+            <p><b>Total Pemasukan:</b> Rp ${totalMasuk.toLocaleString('id-ID')}</p>
+            <p><b>Total Pengeluaran:</b> Rp ${totalKeluar.toLocaleString('id-ID')}</p>
+            <hr>
+            <p><b>Saldo Bersih:</b> <span style="color: ${saldo >= 0 ? 'var(--success)' : 'var(--danger)'}"><b>Rp ${saldo.toLocaleString('id-ID')}</b></span></p>
+        `;
+    }
+</script>
+</body>
+</html>
